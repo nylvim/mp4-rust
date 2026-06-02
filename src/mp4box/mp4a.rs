@@ -481,6 +481,7 @@ pub struct DecoderSpecificDescriptor {
     pub profile: u8,
     pub freq_index: u8,
     pub chan_conf: u8,
+    pub raw_data: Option<Vec<u8>>,
 }
 
 impl DecoderSpecificDescriptor {
@@ -489,6 +490,7 @@ impl DecoderSpecificDescriptor {
             profile: config.profile as u8,
             freq_index: config.freq_index as u8,
             chan_conf: config.chan_conf as u8,
+            raw_data: config.asc_override.clone(),
         }
     }
 }
@@ -499,10 +501,10 @@ impl Descriptor for DecoderSpecificDescriptor {
     }
 
     fn desc_size(&self) -> u32 {
-        if self.profile < 31 {
-            2
+        if let Some(ref data) = self.raw_data {
+            data.len() as u32
         } else {
-            3
+            2
         }
     }
 }
@@ -538,25 +540,29 @@ fn get_chan_conf<R: Read + Seek>(
 }
 
 impl<R: Read + Seek> ReadDesc<&mut R> for DecoderSpecificDescriptor {
-    fn read_desc(reader: &mut R, _size: u32) -> Result<Self> {
+    fn read_desc(reader: &mut R, size: u32) -> Result<Self> {
         let byte_a = reader.read_u8()?;
         let byte_b = reader.read_u8()?;
         let profile = get_audio_object_type(byte_a, byte_b);
-        let freq_index;
-        let chan_conf;
         if profile > 31 {
-            freq_index = (byte_b >> 1) & 0x0F;
-            chan_conf = get_chan_conf(reader, byte_b, freq_index, true)?;
-        } else {
-            freq_index = ((byte_a & 0x07) << 1) + (byte_b >> 7);
-            chan_conf = get_chan_conf(reader, byte_b, freq_index, false)?;
-        }
+            let mut data = vec![0; size as usize];
+            reader.read_exact(&mut data)?;
 
-        Ok(Self {
-            profile,
-            freq_index,
-            chan_conf,
-        })
+            Ok(Self {
+                raw_data: Some(data),
+                ..Default::default()
+            })
+        } else {
+            let freq_index = ((byte_a & 0x07) << 1) + (byte_b >> 7);
+            let chan_conf = get_chan_conf(reader, byte_b, freq_index, false)?;
+
+            Ok(Self {
+                profile,
+                freq_index,
+                chan_conf,
+                raw_data: None,
+            })
+        }
     }
 }
 
@@ -565,7 +571,9 @@ impl<W: Write> WriteDesc<&mut W> for DecoderSpecificDescriptor {
         let size = self.desc_size();
         write_desc(writer, Self::desc_tag(), size)?;
 
-        if self.profile > 31 {
+        if let Some(ref data) = self.raw_data {
+            writer.write_all(data)?;
+        } else if self.profile > 31 {
             let ext = self.profile - 32;
             writer.write_u8((31 << 3) + (ext >> 3))?;
             writer.write_u8((ext << 5) + (self.freq_index << 1) + (self.chan_conf >> 3))?;
@@ -645,6 +653,7 @@ mod tests {
                             profile: 2,
                             freq_index: 3,
                             chan_conf: 1,
+                            raw_data: None,
                         },
                     },
                     sl_config: SLConfigDescriptor::default(),

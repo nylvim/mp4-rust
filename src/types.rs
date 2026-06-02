@@ -590,6 +590,7 @@ pub struct AacConfig {
     pub profile: AudioObjectType,
     pub freq_index: SampleFreqIndex,
     pub chan_conf: ChannelConfig,
+    pub asc_override: Option<Vec<u8>>,
 }
 
 impl Default for AacConfig {
@@ -599,6 +600,7 @@ impl Default for AacConfig {
             profile: AudioObjectType::AacLowComplexity,
             freq_index: SampleFreqIndex::Freq48000,
             chan_conf: ChannelConfig::Stereo,
+            asc_override: None,
         }
     }
 }
